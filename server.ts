@@ -58,6 +58,8 @@ let memoryContacts = [
 ];
 
 // Asymmetric MongoDB Connection
+let connectionPromise: Promise<void> | null = null;
+
 async function connectToMongo() {
   const mongoUri = process.env.MONGODB_URI;
   if (!mongoUri) {
@@ -99,9 +101,27 @@ async function connectToMongo() {
   }
 }
 
-async function configureApp() {
-  // Try connecting first
-  await connectToMongo();
+function getMongoConnection() {
+  if (!connectionPromise) {
+    connectionPromise = connectToMongo();
+  }
+  return connectionPromise;
+}
+
+// Start connection immediately in background on import
+getMongoConnection();
+
+// Connect check middleware to await database setup before handling request (important on Serverless/Vercel)
+app.use(async (req, res, next) => {
+  if (process.env.MONGODB_URI && !isDbConnected && dbError === null) {
+    try {
+      await getMongoConnection();
+    } catch (e) {
+      // safe ignore, error is captured in dbError
+    }
+  }
+  next();
+});
 
   // 1. GET /api/config
   app.get("/api/config", (req, res) => {
@@ -320,12 +340,16 @@ async function configureApp() {
 
   // 7. Serves compiled client files using Vite middleware in Dev of Express router fallbacks
   if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
-    const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
+    import("vite").then(({ createServer: createViteServer }) => {
+      createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      }).then(vite => {
+        app.use(vite.middlewares);
+      });
+    }).catch(err => {
+      console.error("Vite development server integration failed:", err);
     });
-    app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
@@ -336,17 +360,12 @@ async function configureApp() {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
-}
 
-configureApp().then(() => {
   // Standalone server lifecycle (skips when deployed to Vercel Serverless Functions)
   if (!process.env.VERCEL) {
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`CARDNET API server now listening internally on target port ${PORT}`);
     });
   }
-}).catch(err => {
-  console.error("System configuration bootstrap failed:", err);
-});
 
-export default app;
+  export default app;
