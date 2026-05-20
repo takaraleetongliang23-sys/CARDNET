@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import { MongoClient, ObjectId } from "mongodb";
-import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -321,6 +320,7 @@ async function configureApp() {
 
   // 7. Serves compiled client files using Vite middleware in Dev of Express router fallbacks
   if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
