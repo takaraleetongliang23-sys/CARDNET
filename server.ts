@@ -61,7 +61,7 @@ let memoryContacts = [
 let connectionPromise: Promise<void> | null = null;
 
 async function connectToMongo() {
-  const mongoUri = process.env.MONGODB_URI;
+  const mongoUri = process.env.MONGODB_URI?.trim();
   if (!mongoUri) {
     dbMode = "memory";
     dbError = "MONGODB_URI environment variable is missing";
@@ -80,11 +80,19 @@ async function connectToMongo() {
       socketTimeoutMS: 8000,
     });
     
-    // Explicit promise timeout wrapper to forcefully prevent Vercel Serverless Function 10-second hang timeouts
+    let timeoutId: string | number | NodeJS.Timeout;
     await Promise.race([
-      mongoClient.connect(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Database connection reached forced 8-second application timeout")), 8000))
-    ]);
+      mongoClient.connect().catch(e => {
+        console.error("Background connect error:", e.message);
+        throw e;
+      }),
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error("Database connection reached forced 8-second application timeout")), 8000);
+      })
+    ]).finally(() => clearTimeout(timeoutId as any));
+    
+    // Explicit safety catch for the un-awaited promise after timeout occurs
+    mongoClient.connect().catch(e => console.error("Delayed mongodb connection rejection safely caught:", e.message));
 
     dbInstance = mongoClient.db("cardnet");
     dbMode = "database";
