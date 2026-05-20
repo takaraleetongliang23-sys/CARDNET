@@ -77,6 +77,7 @@ async function connectToMongo() {
     mongoClient = new MongoClient(mongoUri, {
       connectTimeoutMS: 3000,
       serverSelectionTimeoutMS: 3000,
+      socketTimeoutMS: 3000,
       family: 4,
     });
     await mongoClient.connect();
@@ -123,8 +124,10 @@ app.use(async (req, res, next) => {
   next();
 });
 
-  // 1. GET /api/config
-  app.get("/api/config", (req, res) => {
+  const apiRouter = express.Router();
+
+  // 1. GET config
+  apiRouter.get("/config", (req, res) => {
     res.json({
       configured: !!process.env.MONGODB_URI,
       mode: dbMode,
@@ -134,8 +137,8 @@ app.use(async (req, res, next) => {
     });
   });
 
-  // 2. GET /api/contacts
-  app.get("/api/contacts", async (req, res) => {
+  // 2. GET contacts
+  apiRouter.get("/contacts", async (req, res) => {
     try {
       if (dbMode === "database" && dbInstance) {
         try {
@@ -158,8 +161,8 @@ app.use(async (req, res, next) => {
     }
   });
 
-  // 3. GET /api/contacts/:id
-  app.get("/api/contacts/:id", async (req, res) => {
+  // 3. GET contacts/:id
+  apiRouter.get("/contacts/:id", async (req, res) => {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({ error: "Invalid contact ID format. ID must be a 24-character hexadecimal string." });
@@ -194,8 +197,8 @@ app.use(async (req, res, next) => {
     }
   });
 
-  // 4. POST /api/contacts
-  app.post("/api/contacts", async (req, res) => {
+  // 4. POST contacts
+  apiRouter.post("/contacts", async (req, res) => {
     const {
       firstName,
       lastName,
@@ -259,8 +262,8 @@ app.use(async (req, res, next) => {
     }
   });
 
-  // 5. PUT /api/contacts/:id
-  app.put("/api/contacts/:id", async (req, res) => {
+  // 5. PUT contacts/:id
+  apiRouter.put("/contacts/:id", async (req, res) => {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({ error: "Invalid contact ID format. ID must be a 24-character hexadecimal string." });
@@ -341,8 +344,8 @@ app.use(async (req, res, next) => {
     }
   });
 
-  // 6. DELETE /api/contacts/:id
-  app.delete("/api/contacts/:id", async (req, res) => {
+  // 6. DELETE contacts/:id
+  apiRouter.delete("/contacts/:id", async (req, res) => {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({ error: "Invalid contact ID format. ID must be a 24-character hexadecimal string." });
@@ -376,6 +379,10 @@ app.use(async (req, res, next) => {
       res.status(500).json({ error: "Failed to delete contact card" });
     }
   });
+
+  // Mount API router
+  app.use("/api", apiRouter);
+  app.use("/", apiRouter); // Optional fallback if Vercel serverless strips the base path completely.
 
   // 7. Serves compiled client files using Vite middleware in Dev of Express router fallbacks
   if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
