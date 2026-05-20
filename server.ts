@@ -75,8 +75,8 @@ async function connectToMongo() {
     // family: 4 forces MongoClient to resolve DNS hostnames via IPv4 only.
     // This is vital in sandboxed and serverless container platforms where IPv6 routing/handshakes fail.
     mongoClient = new MongoClient(mongoUri, {
-      connectTimeoutMS: 5000,
-      serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 3000,
+      serverSelectionTimeoutMS: 3000,
       family: 4,
     });
     await mongoClient.connect();
@@ -138,13 +138,20 @@ app.use(async (req, res, next) => {
   app.get("/api/contacts", async (req, res) => {
     try {
       if (dbMode === "database" && dbInstance) {
-        const list = await dbInstance.collection("contacts").find().sort({ createdAt: -1 }).toArray();
-        return res.json(list);
-      } else {
-        // Return memory contacts sorted by createdAt descending
-        const sorted = [...memoryContacts].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-        return res.json(sorted);
+        try {
+          const list = await dbInstance.collection("contacts").find().sort({ createdAt: -1 }).toArray();
+          return res.json(list);
+        } catch (dbErr: any) {
+          console.error("Database query of contacts failed. Gracefully falling back to memory mode:", dbErr);
+          dbMode = "memory";
+          isDbConnected = false;
+          dbError = dbErr?.message || "Database disconnected during find query";
+        }
       }
+      
+      // Fallback on-the-fly to Memory Mode
+      const sorted = [...memoryContacts].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      return res.json(sorted);
     } catch (err: any) {
       console.error("Error fetching contacts:", err);
       res.status(500).json({ error: "Failed to retrieve contacts list" });
@@ -160,18 +167,27 @@ app.use(async (req, res, next) => {
 
     try {
       if (dbMode === "database" && dbInstance) {
-        const contact = await dbInstance.collection("contacts").findOne({ _id: new ObjectId(id) });
-        if (!contact) {
-          return res.status(404).json({ error: "Contact card not found" });
+        try {
+          const contact = await dbInstance.collection("contacts").findOne({ _id: new ObjectId(id) });
+          if (contact) {
+            return res.json(contact);
+          } else {
+            return res.status(404).json({ error: "Contact card not found" });
+          }
+        } catch (dbErr: any) {
+          console.error("Database lookup of contact failed. Gracefully falling back to memory mode:", dbErr);
+          dbMode = "memory";
+          isDbConnected = false;
+          dbError = dbErr?.message || "Database disconnected during findOne query";
         }
-        return res.json(contact);
-      } else {
-        const contact = memoryContacts.find(c => c._id === id);
-        if (!contact) {
-          return res.status(404).json({ error: "Contact card not found" });
-        }
-        return res.json(contact);
       }
+      
+      // Fallback on-the-fly to Memory Mode
+      const contact = memoryContacts.find(c => c._id === id);
+      if (!contact) {
+        return res.status(404).json({ error: "Contact card not found info" });
+      }
+      return res.json(contact);
     } catch (err: any) {
       console.error("Error retrieving contact by id:", err);
       res.status(500).json({ error: "Internal server error reading card info" });
@@ -220,16 +236,23 @@ app.use(async (req, res, next) => {
 
     try {
       if (dbMode === "database" && dbInstance) {
-        const result = await dbInstance.collection("contacts").insertOne(newContactData);
-        const saved = { _id: result.insertedId.toString(), ...newContactData };
-        return res.status(201).json(saved);
-      } else {
-        // Generate pseudo-ObjectId (24-char hex string)
-        const mockId = new ObjectId().toString();
-        const savedMemory = { _id: mockId, ...newContactData };
-        memoryContacts.unshift(savedMemory);
-        return res.status(201).json(savedMemory);
+        try {
+          const result = await dbInstance.collection("contacts").insertOne(newContactData);
+          const saved = { _id: result.insertedId.toString(), ...newContactData };
+          return res.status(201).json(saved);
+        } catch (dbErr: any) {
+          console.error("Database schema insert failed. Gracefully falling back to memory mode:", dbErr);
+          dbMode = "memory";
+          isDbConnected = false;
+          dbError = dbErr?.message || "Database disconnected during insert query";
+        }
       }
+      
+      // Fallback on-the-fly to Memory Mode
+      const mockId = new ObjectId().toString();
+      const savedMemory = { _id: mockId, ...newContactData };
+      memoryContacts.unshift(savedMemory);
+      return res.status(201).json(savedMemory);
     } catch (err: any) {
       console.error("Error creating new contact:", err);
       res.status(500).json({ error: "Failed to persist contact card" });
@@ -278,32 +301,40 @@ app.use(async (req, res, next) => {
 
     try {
       if (dbMode === "database" && dbInstance) {
-        const result = await dbInstance.collection("contacts").updateOne(
-          { _id: new ObjectId(id) },
-          { $set: updateMap }
-        );
+        try {
+          const result = await dbInstance.collection("contacts").updateOne(
+            { _id: new ObjectId(id) },
+            { $set: updateMap }
+          );
 
-        if (result.matchedCount === 0) {
-          return res.status(404).json({ error: "Contact not found to update" });
+          if (result.matchedCount === 0) {
+            return res.status(404).json({ error: "Contact not found to update" });
+          }
+
+          const updated = await dbInstance.collection("contacts").findOne({ _id: new ObjectId(id) });
+          return res.json(updated);
+        } catch (dbErr: any) {
+          console.error("Database update query failed. Gracefully falling back to memory mode:", dbErr);
+          dbMode = "memory";
+          isDbConnected = false;
+          dbError = dbErr?.message || "Database disconnected during update query";
         }
-
-        const updated = await dbInstance.collection("contacts").findOne({ _id: new ObjectId(id) });
-        return res.json(updated);
-      } else {
-        const index = memoryContacts.findIndex(c => c._id === id);
-        if (index === -1) {
-          return res.status(404).json({ error: "Contact not found to update" });
-        }
-
-        const existingRecord = memoryContacts[index];
-        const updatedMemory = {
-          ...existingRecord,
-          ...updateMap,
-          _id: id, // preserve ID
-        };
-        memoryContacts[index] = updatedMemory;
-        return res.json(updatedMemory);
       }
+      
+      // Fallback on-the-fly to Memory Mode
+      const index = memoryContacts.findIndex(c => c._id === id);
+      if (index === -1) {
+        return res.status(404).json({ error: "Contact not found to update" });
+      }
+
+      const existingRecord = memoryContacts[index];
+      const updatedMemory = {
+        ...existingRecord,
+        ...updateMap,
+        _id: id,
+      };
+      memoryContacts[index] = updatedMemory;
+      return res.json(updatedMemory);
     } catch (err: any) {
       console.error("Error updating contact:", err);
       res.status(500).json({ error: "Failed to update contact card" });
@@ -319,19 +350,27 @@ app.use(async (req, res, next) => {
 
     try {
       if (dbMode === "database" && dbInstance) {
-        const result = await dbInstance.collection("contacts").deleteOne({ _id: new ObjectId(id) });
-        if (result.deletedCount === 0) {
-          return res.status(404).json({ error: "Contact card not found to delete" });
+        try {
+          const result = await dbInstance.collection("contacts").deleteOne({ _id: new ObjectId(id) });
+          if (result.deletedCount === 0) {
+            return res.status(404).json({ error: "Contact card not found to delete" });
+          }
+          return res.json({ success: true, message: "Contact card successfully deleted" });
+        } catch (dbErr: any) {
+          console.error("Database delete query failed. Gracefully falling back to memory mode:", dbErr);
+          dbMode = "memory";
+          isDbConnected = false;
+          dbError = dbErr?.message || "Database disconnected during delete query";
         }
-        return res.json({ success: true, message: "Contact card successfully deleted" });
-      } else {
-        const originalLength = memoryContacts.length;
-        memoryContacts = memoryContacts.filter(c => c._id !== id);
-        if (memoryContacts.length === originalLength) {
-          return res.status(404).json({ error: "Contact card not found to delete" });
-        }
-        return res.json({ success: true, message: "Contact card successfully deleted" });
       }
+      
+      // Fallback on-the-fly to Memory Mode
+      const originalLength = memoryContacts.length;
+      memoryContacts = memoryContacts.filter(c => c._id !== id);
+      if (memoryContacts.length === originalLength) {
+        return res.status(404).json({ error: "Contact card not found to delete" });
+      }
+      return res.json({ success: true, message: "Contact card successfully deleted" });
     } catch (err: any) {
       console.error("Error deleting contact:", err);
       res.status(500).json({ error: "Failed to delete contact card" });
