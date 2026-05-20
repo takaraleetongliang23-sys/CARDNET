@@ -1,0 +1,6 @@
+{
+  "name": "CardNet",
+  "description": "Enterprise-grade digital business card management system with direct vCard downloading, Live Preview, and dual-mode MongoDB or memory fallback storage.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
