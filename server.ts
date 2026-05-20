@@ -75,9 +75,9 @@ async function connectToMongo() {
     // family: 4 forces MongoClient to resolve DNS hostnames via IPv4 only.
     // This is vital in sandboxed and serverless container platforms where IPv6 routing/handshakes fail.
     mongoClient = new MongoClient(mongoUri, {
-      connectTimeoutMS: 3000,
-      serverSelectionTimeoutMS: 3000,
-      socketTimeoutMS: 3000,
+      connectTimeoutMS: 2000,
+      serverSelectionTimeoutMS: 2000,
+      socketTimeoutMS: 2000,
       family: 4,
     });
     await mongoClient.connect();
@@ -383,6 +383,17 @@ app.use(async (req, res, next) => {
   // Mount API router
   app.use("/api", apiRouter);
   app.use("/", apiRouter); // Optional fallback if Vercel serverless strips the base path completely.
+
+  // API 404 handler
+  app.use("/api/*", (req, res) => {
+    res.status(404).json({ error: "API endpoint not found: " + req.path });
+  });
+
+  // Global Error Handler
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error("Unhandled Global Error:", err);
+    res.status(500).json({ error: err.message || "Internal server error inside Express backend." });
+  });
 
   // 7. Serves compiled client files using Vite middleware in Dev of Express router fallbacks
   if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {

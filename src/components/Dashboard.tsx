@@ -43,7 +43,16 @@ export default function Dashboard() {
         const contactsData = await contactsRes.json();
         setContacts(contactsData);
       } else {
-        throw new Error("Failed to process contacts array retrieval");
+        const errorText = await contactsRes.text();
+        console.error("Fetch returned non-ok:", contactsRes.status, errorText);
+        let errorMsg = "Failed to process contacts array retrieval";
+        try {
+          const parsed = JSON.parse(errorText);
+          if (parsed.error) errorMsg = parsed.error;
+        } catch(e) {
+          errorMsg = `Server Error (${contactsRes.status}): ` + errorText.substring(0, 100);
+        }
+        throw new Error(errorMsg);
       }
     } catch (err: any) {
       setErrorStatus(err?.message || "An error occurred compiling active business cards.");
