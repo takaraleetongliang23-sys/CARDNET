@@ -75,12 +75,17 @@ async function connectToMongo() {
     // family: 4 forces MongoClient to resolve DNS hostnames via IPv4 only.
     // This is vital in sandboxed and serverless container platforms where IPv6 routing/handshakes fail.
     mongoClient = new MongoClient(mongoUri, {
-      connectTimeoutMS: 2000,
-      serverSelectionTimeoutMS: 2000,
-      socketTimeoutMS: 2000,
-      family: 4,
+      connectTimeoutMS: 8000,
+      serverSelectionTimeoutMS: 8000,
+      socketTimeoutMS: 8000,
     });
-    await mongoClient.connect();
+    
+    // Explicit promise timeout wrapper to forcefully prevent Vercel Serverless Function 10-second hang timeouts
+    await Promise.race([
+      mongoClient.connect(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Database connection reached forced 8-second application timeout")), 8000))
+    ]);
+
     dbInstance = mongoClient.db("cardnet");
     dbMode = "database";
     isDbConnected = true;
